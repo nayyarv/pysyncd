@@ -1,74 +1,101 @@
-import os
-import pathlib
 import time
 import subprocess
 import logging
-
-
-from typing import Union
 
 import pexpect
 
 import config
 
+kwargs = {}
+
+if "logfile" in config.settings:
+    kwargs = {
+        "handlers": [
+            logging.FileHandler(config.settings["logfile"]),
+            logging.StreamHandler(),
+        ]
+    }
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=getattr(logging, config.settings.get("level", "INFO")),
     format="%(asctime)s.%(msecs)03d [%(levelname)s] [%(name)s:%(lineno)d] %(message)s",
     datefmt="%Y%m%d %H:%M:%S",
+    **kwargs,
 )
 logger = logging.getLogger("pysyncd")
+
+
+def check_config(sync):
+    for field in ["source", "targetdir"]:
+        if not sync[field].endswith("/"):
+            sync[field] = sync[field] + "/"
 
 
 def build_rysnc(sync=config.sync) -> [str]:
     cmd = []
     cmd.append(sync["rsync"]["binary"])
-    cmd.append("-C")
     if sync["rsync"]["archive"]:
         cmd.append("-a")
     if sync["rsync"]["compress"]:
         cmd.append("-z")
     for exclude in sync["exclude"]:
-        cmd.append(f"--exclude '{exclude}'")
-    cmd.append(sync["source"])
-    cmd.append(f"{sync['host']}:{sync['targetdir']}")
+        cmd.extend(["--exclude", exclude])
+
     logger.debug("Rsync command is %s", cmd)
+    cmd.extend(
+        [config.sync["source"], f"{config.sync['host']}:{config.sync['targetdir']}"]
+    )
     return cmd
 
 
 def build_fswatch(sync=config.sync) -> [str]:
-    cmd = ["/usr/local/bin/fswatch", sync["source"]]
+    cmd = ["/usr/local/bin/fswatch", "-o", sync["source"]]
     for exclude in sync["exclude"]:
-        cmd.append(f"--exclude '{exclude}'")
+        cmd.extend(["--exclude", exclude])
+    for exclude in ["*.lock"]:
+        cmd.extend(["--exclude", exclude])
     logger.debug("Fswatch cmd is %s", " ".join(cmd))
     return cmd
 
 
-def read_config(path: Union[pathlib.Path, str]):
-    fullc = []
-    with open(path, "r") as f:
-        fullconfig = f.read().replace("=", ":")
-        print(fullconfig)
-
-
-def pex_readlines(child: pexpect.spawn):
-    lines_read = []
+def pex_readlines(child: pexpect.spawn) -> int:
     try:
-        while True:
-            lines_read.append(child.readline().strip())
+        return int(child.readline().strip())
     except pexpect.TIMEOUT:
-        logger.debug("Read %d lines", len(lines_read))
-        return lines_read
+        return 0
     except pexpect.EOF:
         raise RuntimeError("Pexpect has shut down unexpectedly")
 
 
+def timeloop(interval=5):
+    from math import ceil
+
+    while True:
+        before = time.time()
+        yield
+        after = time.time()
+        to_sleep = ceil(max(0, interval - (after - before)))
+        logger.debug("Sleeping for %d", to_sleep)
+        time.sleep(to_sleep)
+
+
 def main():
+    check_config(config.sync)
+    base_rsync = build_rysnc()
+
+    logger.info("Running initial rsync %s", " ".join(base_rsync))
+    subprocess.run(base_rsync, check=True)
+
     fswatcher = build_fswatch()
-    child = pexpect.spawn(" ".join(fswatcher), timeout=5)
-    for i in range(10):
+    logger.info("Initial sync over, starting watch sync %s")
+
+    child = pexpect.spawn(fswatcher[0], fswatcher[1:], timeout=1, encoding="utf-8")
+    for _ in timeloop(config.sync.get("interval", 5)):
         all_lines = pex_readlines(child)
-        logger.debug("Sleeping for 5 seconds")
-        time.sleep(5)
+        if all_lines:
+            logger.info("Seen %d files change, running rsync", all_lines)
+            subprocess.run(base_rsync, check=True)
+            logger.info("Rsync over")
 
 
 if __name__ == "__main__":
