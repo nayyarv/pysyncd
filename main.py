@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import time
 import subprocess
 import logging
@@ -34,6 +35,9 @@ def check_config(sync):
 def build_rysnc(sync=config.sync) -> [str]:
     cmd = []
     cmd.append(sync["rsync"]["binary"])
+    if sync.get("nfs_optimised"):
+        cmd.extend("--numeric-ids --omit-dir-times --whole-file".split())
+        cmd.extend(["-T", "/data/scratch/varun"])
     if sync["rsync"]["archive"]:
         cmd.append("-a")
     if sync["rsync"]["compress"]:
@@ -87,7 +91,7 @@ def main():
     subprocess.run(base_rsync, check=True)
 
     fswatcher = build_fswatch()
-    logger.info("Initial sync over, starting watch sync %s")
+    logger.info("Initial sync over, starting watch sync %s", fswatcher)
 
     child = pexpect.spawn(fswatcher[0], fswatcher[1:], timeout=1, encoding="utf-8")
     for _ in timeloop(config.sync.get("interval", 5)):
