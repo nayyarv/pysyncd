@@ -1,13 +1,13 @@
 # Pysyncd
 
-A replacement for lsyncd on os x since it's dev/fsevents
-interface doesn't seem to work
-This uses fswatch as a replacement
+A replacement for lsyncd on os x since it's dev/fsevents interface doesn't seem to work
+
+This uses fswatch as a replacement. 
 
 
 ## Sample Config
 
-This is mostly copied
+This is mostly copied from the lsycnd, but pythonified
 
 ```python
 settings = {
