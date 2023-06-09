@@ -1,1 +1,2 @@
-pexpect
+# TODO: point to my github repo instead. Work out the syntax
+-e /Users/varun/Documents/github/pyfswatch

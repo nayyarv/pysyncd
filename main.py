@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-import time
 import subprocess
 import logging
+import os.path
 
-import pexpect
+from typing import List
 
+import fswatch
+
+# custom python code with the config needed
 import config
+
 
 kwargs = {}
 
@@ -26,18 +30,21 @@ logging.basicConfig(
 logger = logging.getLogger("pysyncd")
 
 
-def check_config(sync):
+def validated_config(sync):
+    """Fixes up config as expected"""
     for field in ["source", "targetdir"]:
         if not sync[field].endswith("/"):
             sync[field] = sync[field] + "/"
+    sync["source"] = os.path.expanduser(sync["source"])
 
 
-def build_rysnc(sync=config.sync) -> [str]:
+def base_rsync(sync=config.sync) -> [str]:
     cmd = []
     cmd.append(sync["rsync"]["binary"])
     if sync.get("nfs_optimised"):
         cmd.extend("--numeric-ids --omit-dir-times --whole-file".split())
-        cmd.extend(["-T", "/data/scratch/varun"])
+        # dont need this since we're not hitting a network drive
+        cmd.extend(["-T", "/data/varun"])
     if sync["rsync"]["archive"]:
         cmd.append("-a")
     if sync["rsync"]["compress"]:
@@ -46,60 +53,51 @@ def build_rysnc(sync=config.sync) -> [str]:
         cmd.extend(["--exclude", exclude])
 
     logger.debug("Rsync command is %s", cmd)
-    cmd.extend(
-        [config.sync["source"], f"{config.sync['host']}:{config.sync['targetdir']}"]
-    )
     return cmd
 
+def init_rsync(base_cmd: List[str], sync=config.sync) -> [str]:
+    return base_cmd + [
+        config.sync["source"], f"{config.sync['host']}:{config.sync['targetdir']}" 
+    ]
+    
 
-def build_fswatch(sync=config.sync) -> [str]:
-    cmd = ["/usr/local/bin/fswatch", "-o", sync["source"]]
-    for exclude in sync["exclude"]:
-        cmd.extend(["--exclude", exclude])
-    for exclude in ["*.lock"]:
-        cmd.extend(["--exclude", exclude])
-    logger.debug("Fswatch cmd is %s", " ".join(cmd))
-    return cmd
+def file_rsync(base_cmd: List[str], filepath: str, sync=config.sync) -> [str]:
+    """use for a file specific rsync"""
+    relpath = os.path.relpath(filepath, sync['source'])
+    destpath = os.path.join(sync['targetdir'], relpath)
+    return base_cmd + [
+        filepath, f"{config.sync['host']}:{destpath}"
+    ]
 
-
-def pex_readlines(child: pexpect.spawn) -> int:
-    try:
-        return int(child.readline().strip())
-    except pexpect.TIMEOUT:
-        return 0
-    except pexpect.EOF:
-        raise RuntimeError("Pexpect has shut down unexpectedly")
-
-
-def timeloop(interval=5):
-    from math import ceil
-
-    while True:
-        before = time.time()
-        yield
-        after = time.time()
-        to_sleep = ceil(max(0, interval - (after - before)))
-        logger.debug("Sleeping for %d", to_sleep)
-        time.sleep(to_sleep)
 
 
 def main():
-    check_config(config.sync)
-    base_rsync = build_rysnc()
+    validated_config(config.sync)
+    base_cmd = base_rsync()
+    init_sync_cmd = init_rsync(base_cmd)
 
-    logger.info("Running initial rsync %s", " ".join(base_rsync))
-    subprocess.run(base_rsync, check=True)
+    logger.info("Running initial rsync %s", " ".join(init_sync_cmd))
+    subprocess.run(init_sync_cmd, check=True)
+    logger.info("Rsync over, starting watch command")
 
-    fswatcher = build_fswatch()
-    logger.info("Initial sync over, starting watch sync %s", fswatcher)
+    monitor = fswatch.Monitor()
+    monitor.add_path(config.sync["source"])
 
-    child = pexpect.spawn(fswatcher[0], fswatcher[1:], timeout=1, encoding="utf-8")
-    for _ in timeloop(config.sync.get("interval", 5)):
-        all_lines = pex_readlines(child)
-        if all_lines:
-            logger.info("Seen %d files change, running rsync", all_lines)
-            subprocess.run(base_rsync, check=True)
-            logger.info("Rsync over")
+    def callb(path: bytes, *args):
+        """ 
+        Full callback signature. flags type might not be correct.
+        def callback(path: bytes, evt_time: int, flags: List[int], flags_num: int):
+            print(path.decode(), evt_time, flags_num, event_num)
+
+        """
+        filepath = path.decode()
+        fl_cmd = file_rsync(base_cmd, filepath)
+        logger.debug("Running file rsync %s", " ".join(fl_cmd))
+        subprocess.run(fl_cmd, check=True)
+        logger.debug("Finished %s sync", filepath)
+
+    monitor.set_callback(callb)
+    monitor.start()
 
 
 if __name__ == "__main__":
