@@ -55,20 +55,19 @@ def base_rsync(sync=config.sync) -> [str]:
     logger.debug("Rsync command is %s", cmd)
     return cmd
 
+
 def init_rsync(base_cmd: List[str], sync=config.sync) -> [str]:
     return base_cmd + [
-        config.sync["source"], f"{config.sync['host']}:{config.sync['targetdir']}" 
+        config.sync["source"],
+        f"{config.sync['host']}:{config.sync['targetdir']}",
     ]
-    
+
 
 def file_rsync(base_cmd: List[str], filepath: str, sync=config.sync) -> [str]:
     """use for a file specific rsync"""
-    relpath = os.path.relpath(filepath, sync['source'])
-    destpath = os.path.join(sync['targetdir'], relpath)
-    return base_cmd + [
-        filepath, f"{config.sync['host']}:{destpath}"
-    ]
-
+    relpath = os.path.relpath(filepath, sync["source"])
+    destpath = os.path.join(sync["targetdir"], relpath)
+    return base_cmd + [filepath, f"{config.sync['host']}:{destpath}"]
 
 
 def main():
@@ -84,7 +83,7 @@ def main():
     monitor.add_path(config.sync["source"])
 
     def callb(path: bytes, *args):
-        """ 
+        """
         Full callback signature. flags type might not be correct.
         def callback(path: bytes, evt_time: int, flags: List[int], flags_num: int):
             print(path.decode(), evt_time, flags_num, event_num)

@@ -9,7 +9,7 @@ Deletion is off by default and exclusions are kind of necessary for things like 
 ## Install
 
 TODO: PR to pyfswatch
-TODO: Make requirements.txt use a git/web install instead so the install is easier. 
+TODO: Make requirements.txt use a git/web install instead so the install is easier.
 
 1. Install fswatch. `brew install fswatch`
 2. Checkout [my pyfswatch fork](https://github.com/nayyarv/pyfswatch) or download the zip. `git clone git@github.com:nayyarv/pyfswatch.git`
@@ -43,4 +43,4 @@ sync = {
 ## Notes/Limitations
 
 1. Spawns an rsync for each file changed. Might choke on git checkout, testing needed.
-2. You should configure a whole git checkout so the .git info can be synced over so branch info etc gets reflected for branch changes. 
+2. You should configure a whole git checkout so the .git info can be synced over so branch info etc gets reflected for branch changes.
